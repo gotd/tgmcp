@@ -134,6 +134,24 @@ func (c *dialogCache) set(ch UnreadChannel) {
 	c.persist(ch)
 }
 
+// remove drops a channel from the cache and the store. Used when the channel is
+// no longer accessible (e.g. CHANNEL_PRIVATE: we were kicked, banned, or it went
+// private).
+func (c *dialogCache) remove(channelID int64) {
+	c.mu.Lock()
+	_, ok := c.channels[channelID]
+	delete(c.channels, channelID)
+	c.mu.Unlock()
+
+	if !ok || c.store == nil {
+		return
+	}
+
+	if err := c.store.delete(channelID); err != nil {
+		c.lg.Error("Delete dialog", zap.Int64("id", channelID), zap.Error(err))
+	}
+}
+
 // observeIncoming records an incoming message in a channel. If the channel is
 // already cached its unread count is incremented; otherwise build is called to
 // resolve channel metadata (from update entities) and the channel is inserted

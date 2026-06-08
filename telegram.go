@@ -13,7 +13,15 @@ import (
 	"github.com/gotd/td/telegram/query/dialogs"
 	"github.com/gotd/td/telegram/query/messages"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 )
+
+// isChannelGone reports whether err means the channel is no longer accessible:
+// we were kicked or banned, or it went private. The cached entry should be
+// dropped in that case.
+func isChannelGone(err error) bool {
+	return tgerr.Is(err, "CHANNEL_PRIVATE")
+}
 
 // Local aliases to keep function signatures compact.
 type (
@@ -87,6 +95,12 @@ func refreshChannel(ctx context.Context, api *tg.Client, cache *dialogCache, cha
 		&tg.InputDialogPeer{Peer: ipc},
 	})
 	if err != nil {
+		if isChannelGone(err) {
+			cache.remove(channelID)
+
+			return nil
+		}
+
 		return errors.Wrap(err, "get peer dialogs")
 	}
 
@@ -133,6 +147,12 @@ func readUnread(ctx context.Context, api *tg.Client, cache *dialogCache, target 
 		}
 	}
 	if err := iter.Err(); err != nil {
+		if isChannelGone(err) {
+			cache.remove(ch.ID)
+
+			return UnreadChannel{}, nil, errors.Errorf("channel %q is no longer accessible", target)
+		}
+
 		return UnreadChannel{}, nil, errors.Wrap(err, "fetch history")
 	}
 
@@ -233,6 +253,12 @@ func markChannelRead(ctx context.Context, api *tg.Client, cache *dialogCache, ch
 		MaxID: 0, // 0 = mark everything as read
 	})
 	if err != nil {
+		if isChannelGone(err) {
+			cache.remove(ch.ID)
+
+			return nil
+		}
+
 		return errors.Wrap(err, "channels.readHistory")
 	}
 

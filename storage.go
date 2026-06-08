@@ -183,6 +183,18 @@ func (d *dialogStore) putAll(chs []UnreadChannel) error {
 	})
 }
 
+// delete removes a single dialog by channel ID.
+func (d *dialogStore) delete(channelID int64) error {
+	return d.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dialogsBucket)
+		if b == nil {
+			return nil
+		}
+
+		return b.Delete(i64b(channelID))
+	})
+}
+
 // load returns all persisted dialogs.
 func (d *dialogStore) load() ([]UnreadChannel, error) {
 	var out []UnreadChannel
