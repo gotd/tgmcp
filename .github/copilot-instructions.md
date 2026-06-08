@@ -74,10 +74,10 @@ Example:
 go build -o /tmp/tgmcp . && scp /tmp/tgmcp cygame:/tmp
 ```
 
-Then on cygame:
+Then on cygame (tgmcp runs as a root systemd **user** unit, so use `--user`):
 
 ```
-mv /tmp/tgmcp /root/tgmcp/tgmcp && systemctl restart tgmcp.service
+mv /tmp/tgmcp /root/tgmcp/tgmcp && XDG_RUNTIME_DIR=/run/user/0 systemctl --user restart tgmcp.service
 ```
 
 ## General instructions
