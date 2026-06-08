@@ -30,7 +30,12 @@ func runAuth(ctx context.Context, cfg Config) error {
 	dispatcher := tg.NewUpdateDispatcher()
 	loggedIn := qrlogin.OnLoginToken(&dispatcher)
 
-	client, waiter, _, err := newClient(cfg, dispatcher)
+	lg, err := newLogger(cfg)
+	if err != nil {
+		return err
+	}
+
+	client, waiter, err := newClient(cfg, dispatcher, lg)
 	if err != nil {
 		return err
 	}

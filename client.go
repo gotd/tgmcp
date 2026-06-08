@@ -19,27 +19,12 @@ import (
 	"github.com/gotd/td/tg"
 )
 
-// newClient builds a Telegram client using the given configuration.
-//
-// handler is optional: when non-nil it is used as the update handler so that
-// callers (e.g. the QR auth flow) can wire in a dispatcher. Pass nil for the
-// default no-op handler.
-//
-// The returned waiter must wrap client.Run:
-//
-//	return waiter.Run(ctx, func(ctx context.Context) error {
-//	    return client.Run(ctx, handler)
-//	})
-//
-// Logs are written as JSON to stderr so that journald (or any supervisor) captures them.
-func newClient(cfg Config, handler telegram.UpdateHandler) (*telegram.Client, *floodwait.Waiter, *zap.Logger, error) {
-	if err := os.MkdirAll(cfg.SessionDir, 0o700); err != nil {
-		return nil, nil, nil, errors.Wrap(err, "create session dir")
-	}
-
+// newLogger builds the JSON logger written to stderr so that journald (or any
+// supervisor) captures it.
+func newLogger(cfg Config) (*zap.Logger, error) {
 	level, err := zapcore.ParseLevel(cfg.LogLevel)
 	if err != nil {
-		return nil, nil, nil, errors.Wrapf(err, "parse log level %q", cfg.LogLevel)
+		return nil, errors.Wrapf(err, "parse log level %q", cfg.LogLevel)
 	}
 
 	logCfg := zap.NewProductionConfig()
@@ -47,7 +32,27 @@ func newClient(cfg Config, handler telegram.UpdateHandler) (*telegram.Client, *f
 	logCfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	lg, err := logCfg.Build()
 	if err != nil {
-		return nil, nil, nil, errors.Wrap(err, "build logger")
+		return nil, errors.Wrap(err, "build logger")
+	}
+
+	return lg, nil
+}
+
+// newClient builds a Telegram client using the given configuration, update
+// handler, and logger.
+//
+// handler is optional: when non-nil it is used as the update handler so that
+// callers can wire in a dispatcher or the updates manager. Pass nil for the
+// default no-op handler.
+//
+// The returned waiter must wrap client.Run:
+//
+//	return waiter.Run(ctx, func(ctx context.Context) error {
+//	    return client.Run(ctx, handler)
+//	})
+func newClient(cfg Config, handler telegram.UpdateHandler, lg *zap.Logger) (*telegram.Client, *floodwait.Waiter, error) {
+	if err := os.MkdirAll(cfg.SessionDir, 0o700); err != nil {
+		return nil, nil, errors.Wrap(err, "create session dir")
 	}
 
 	waiter := floodwait.NewWaiter().WithCallback(func(ctx context.Context, wait floodwait.FloodWait) {
@@ -67,7 +72,7 @@ func newClient(cfg Config, handler telegram.UpdateHandler) (*telegram.Client, *f
 		},
 	})
 
-	return client, waiter, lg, nil
+	return client, waiter, nil
 }
 
 // invokeLogger is a Telegram middleware that logs every MTProto RPC call at

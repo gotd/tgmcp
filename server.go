@@ -13,8 +13,9 @@ import (
 
 // server holds the dependencies shared by the MCP tool handlers.
 type server struct {
-	api *tg.Client
-	lg  *zap.Logger
+	api   *tg.Client
+	cache *dialogCache
+	lg    *zap.Logger
 }
 
 // logged wraps a typed tool handler so that every tool call is logged at debug
@@ -92,19 +93,15 @@ func (s *server) register(m *mcp.Server) {
 	}, logged(s.lg, "mark_all_channels_read", s.handleMarkAllChannelsRead))
 }
 
-func (s *server) handleListChannels(ctx context.Context, _ *mcp.CallToolRequest, _ listChannelsInput) (*mcp.CallToolResult, listChannelsOutput, error) {
-	channels, err := listUnreadChannels(ctx, s.api)
-	if err != nil {
-		return nil, listChannelsOutput{}, err
-	}
-	return nil, listChannelsOutput{Channels: channels}, nil
+func (s *server) handleListChannels(_ context.Context, _ *mcp.CallToolRequest, _ listChannelsInput) (*mcp.CallToolResult, listChannelsOutput, error) {
+	return nil, listChannelsOutput{Channels: s.cache.unread()}, nil
 }
 
 func (s *server) handleReadChannel(ctx context.Context, _ *mcp.CallToolRequest, in readChannelInput) (*mcp.CallToolResult, readChannelOutput, error) {
 	if in.Channel == "" {
 		return nil, readChannelOutput{}, errors.New("channel is required")
 	}
-	ch, msgs, err := readUnread(ctx, s.api, in.Channel, in.Limit)
+	ch, msgs, err := readUnread(ctx, s.api, s.cache, in.Channel, in.Limit)
 	if err != nil {
 		return nil, readChannelOutput{}, err
 	}
@@ -115,21 +112,20 @@ func (s *server) handleMarkChannelRead(ctx context.Context, _ *mcp.CallToolReque
 	if in.Channel == "" {
 		return nil, markChannelReadOutput{}, errors.New("channel is required")
 	}
-	ch, err := findChannel(ctx, s.api, in.Channel)
-	if err != nil {
-		return nil, markChannelReadOutput{}, err
+	ch, ok := s.cache.find(in.Channel)
+	if !ok {
+		return nil, markChannelReadOutput{}, errors.Errorf("channel %q not found in dialogs", in.Channel)
 	}
-	if err := markChannelRead(ctx, s.api, ch); err != nil {
+	if err := markChannelRead(ctx, s.api, s.cache, ch); err != nil {
 		return nil, markChannelReadOutput{}, err
 	}
 	return nil, markChannelReadOutput{Channel: ch}, nil
 }
 
 func (s *server) handleMarkAllChannelsRead(ctx context.Context, _ *mcp.CallToolRequest, _ markAllChannelsReadInput) (*mcp.CallToolResult, markAllChannelsReadOutput, error) {
-	n, err := markAllChannelsRead(ctx, s.api)
+	n, err := markAllChannelsRead(ctx, s.api, s.cache)
 	if err != nil {
 		return nil, markAllChannelsReadOutput{}, err
 	}
 	return nil, markAllChannelsReadOutput{MarkedCount: n}, nil
 }
-

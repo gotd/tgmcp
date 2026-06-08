@@ -17,9 +17,14 @@ import (
 	"time"
 
 	"github.com/go-faster/errors"
+	"github.com/gotd/contrib/bbolt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/gotd/td/telegram/updates"
+	"github.com/gotd/td/tg"
 )
 
 func main() {
@@ -76,8 +81,40 @@ func rootCmd() *cobra.Command {
 // runServe connects to Telegram using the stored session and serves the MCP
 // protocol over HTTP using the streamable transport. It never prompts: if the
 // session is missing or expired, it asks the user to run "tgmcp auth" first.
+//
+// The dialog list is loaded once at startup into an in-memory cache, which is
+// then kept live by the gotd updates manager (gap-safe via getDifference). This
+// avoids re-fetching the dialog list on every tool call, which caused
+// FLOOD_WAIT.
 func runServe(ctx context.Context, cfg Config) error {
-	client, waiter, lg, err := newClient(cfg, nil)
+	lg, err := newLogger(cfg)
+	if err != nil {
+		return err
+	}
+
+	db, err := openStateDB(cfg)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			lg.Error("Close state database", zap.Error(err))
+		}
+	}()
+
+	cache := newDialogCache(&dialogStore{db: db}, lg)
+
+	dispatcher := tg.NewUpdateDispatcher()
+	registerCacheHandlers(&dispatcher, cache)
+
+	mgr := updates.New(updates.Config{
+		Handler:      dispatcher,
+		Storage:      bbolt.NewStateStorage(db),
+		AccessHasher: accessHasher{db: db},
+		Logger:       lg.Named("updates"),
+	})
+
+	client, waiter, err := newClient(cfg, mgr, lg)
 	if err != nil {
 		return err
 	}
@@ -92,7 +129,12 @@ func runServe(ctx context.Context, cfg Config) error {
 				return errors.New("not authorized: run `tgmcp auth` first to create a session")
 			}
 
-			srv := &server{api: client.API(), lg: lg}
+			self, err := client.Self(ctx)
+			if err != nil {
+				return errors.Wrap(err, "self")
+			}
+
+			srv := &server{api: client.API(), cache: cache, lg: lg}
 			m := mcp.NewServer(&mcp.Implementation{
 				Name:    "tgmcp",
 				Version: "0.1.0",
@@ -117,13 +159,44 @@ func runServe(ctx context.Context, cfg Config) error {
 				}
 			}()
 
-			lg.Info("Authorized, serving MCP over HTTP", zap.String("addr", cfg.HTTPAddr))
+			g, ctx := errgroup.WithContext(ctx)
 
-			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				return errors.Wrap(err, "http serve")
-			}
+			// Run the updates manager: it loads the persisted state, seeds the
+			// dialog cache once via OnStart, then keeps it live, recovering gaps
+			// with getDifference.
+			g.Go(func() error {
+				return mgr.Run(ctx, client.API(), self.ID, updates.AuthOptions{
+					OnStart: func(ctx context.Context) {
+						// Seed the cache from persistent storage. Only fetch the
+						// full dialog list when nothing is persisted (first run);
+						// on later starts the updates manager reconciles the
+						// persisted cache via getDifference.
+						n, err := cache.loadFromStore()
+						if err != nil {
+							lg.Error("Load persisted dialogs", zap.Error(err))
+						}
+						if n == 0 {
+							if err := bootstrapDialogs(ctx, client.API(), cache); err != nil {
+								lg.Error("Bootstrap dialogs", zap.Error(err))
+								return
+							}
+						} else {
+							lg.Info("Loaded persisted dialogs", zap.Int("count", n))
+						}
+						lg.Info("Authorized, serving MCP over HTTP", zap.String("addr", cfg.HTTPAddr))
+					},
+				})
+			})
 
-			return nil
+			g.Go(func() error {
+				if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					return errors.Wrap(err, "http serve")
+				}
+
+				return nil
+			})
+
+			return g.Wait()
 		})
 	})
 }

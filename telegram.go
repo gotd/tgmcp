@@ -27,6 +27,7 @@ type UnreadChannel struct {
 	Title       string `json:"title" jsonschema:"channel title"`
 	Username    string `json:"username,omitempty" jsonschema:"public @username, if any"`
 	UnreadCount int    `json:"unread_count" jsonschema:"number of unread messages"`
+	UnreadMark  bool   `json:"unread_mark,omitempty" jsonschema:"true if manually marked as unread"`
 	Broadcast   bool   `json:"broadcast" jsonschema:"true for broadcast channels"`
 	Megagroup   bool   `json:"megagroup" jsonschema:"true for supergroups"`
 
@@ -44,63 +45,39 @@ type Message struct {
 	Author string `json:"author,omitempty" jsonschema:"sender name, for groups"`
 }
 
-// listUnreadChannels iterates over all dialogs and returns the channels and
-// supergroups that currently have unread messages.
-func listUnreadChannels(ctx context.Context, api *tg.Client) ([]UnreadChannel, error) {
+// bootstrapDialogs loads the full dialog list once and seeds the cache. It
+// fetches dialogs in batches of MAX_GET_DIALOGS (100, the server-side limit)
+// rather than one at a time, which is the default of the gotd iterator.
+func bootstrapDialogs(ctx context.Context, api *tg.Client, cache *dialogCache) error {
 	var result []UnreadChannel
 
-	iter := query.GetDialogs(api).Iter()
+	iter := query.GetDialogs(api).BatchSize(100).Iter()
 	for iter.Next(ctx) {
-		ch, ok := unreadChannelFromDialog(iter.Value())
+		ch, ok := channelFromDialog(iter.Value())
 		if !ok {
 			continue
 		}
 		result = append(result, ch)
 	}
 	if err := iter.Err(); err != nil {
-		return nil, errors.Wrap(err, "iterate dialogs")
+		return errors.Wrap(err, "iterate dialogs")
 	}
 
-	return result, nil
-}
+	cache.replaceAll(result)
 
-// findChannel resolves a channel by @username or numeric ID by scanning the
-// dialog list. Scanning the dialogs (rather than resolving directly) gives us
-// the unread boundary and access hash in a single pass.
-func findChannel(ctx context.Context, api *tg.Client, target string) (UnreadChannel, error) {
-	target = strings.TrimPrefix(strings.TrimSpace(target), "@")
-	wantID, isID := parseID(target)
-
-	iter := query.GetDialogs(api).Iter()
-	for iter.Next(ctx) {
-		ch, ok := channelFromDialog(iter.Value())
-		if !ok {
-			continue
-		}
-		if isID && ch.ID == wantID {
-			return ch, nil
-		}
-		if !isID && strings.EqualFold(ch.Username, target) {
-			return ch, nil
-		}
-	}
-	if err := iter.Err(); err != nil {
-		return UnreadChannel{}, errors.Wrap(err, "iterate dialogs")
-	}
-
-	return UnreadChannel{}, errors.Errorf("channel %q not found in dialogs", target)
+	return nil
 }
 
 // readUnread returns the unread messages of a channel, newest first, capped at
 // limit. A non-positive limit defaults to 50.
-func readUnread(ctx context.Context, api *tg.Client, target string, limit int) (UnreadChannel, []Message, error) {
+func readUnread(ctx context.Context, api *tg.Client, cache *dialogCache, target string, limit int) (UnreadChannel, []Message, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 
-	ch, err := findChannel(ctx, api, target)
-	if err != nil {
-		return UnreadChannel{}, nil, err
+	ch, ok := cache.find(target)
+	if !ok {
+		return UnreadChannel{}, nil, errors.Errorf("channel %q not found in dialogs", target)
 	}
 
 	var out []Message
@@ -150,6 +127,7 @@ func channelFromDialog(elem dialogElem) (UnreadChannel, bool) {
 		Title:          c.Title,
 		Username:       username,
 		UnreadCount:    dlg.UnreadCount,
+		UnreadMark:     dlg.UnreadMark,
 		Broadcast:      c.Broadcast,
 		Megagroup:      c.Megagroup,
 		readInboxMaxID: dlg.ReadInboxMaxID,
@@ -157,14 +135,22 @@ func channelFromDialog(elem dialogElem) (UnreadChannel, bool) {
 	}, true
 }
 
-// unreadChannelFromDialog is like channelFromDialog but only returns channels
-// that have unread messages.
-func unreadChannelFromDialog(elem dialogElem) (UnreadChannel, bool) {
-	ch, ok := channelFromDialog(elem)
-	if !ok || ch.UnreadCount <= 0 {
-		return UnreadChannel{}, false
+// channelFromEntity builds an UnreadChannel from a channel object received in
+// update entities, when the dialog is not yet cached.
+func channelFromEntity(c *tg.Channel) UnreadChannel {
+	username, _ := c.GetUsername()
+	accessHash, _ := c.GetAccessHash()
+	return UnreadChannel{
+		ID:        c.ID,
+		Title:     c.Title,
+		Username:  username,
+		Broadcast: c.Broadcast,
+		Megagroup: c.Megagroup,
+		peer: &tg.InputPeerChannel{
+			ChannelID:  c.ID,
+			AccessHash: accessHash,
+		},
 	}
-	return ch, true
 }
 
 func messageFromTG(msg *tg.Message, ent entities) Message {
@@ -200,7 +186,7 @@ func authorName(msg *tg.Message, ent entities) string {
 
 // markChannelRead marks all messages in a channel as read up to and including
 // the latest message (MaxID=0 means "all messages").
-func markChannelRead(ctx context.Context, api *tg.Client, ch UnreadChannel) error {
+func markChannelRead(ctx context.Context, api *tg.Client, cache *dialogCache, ch UnreadChannel) error {
 	ipc, ok := ch.peer.(*tg.InputPeerChannel)
 	if !ok {
 		return errors.Errorf("peer for channel %d is not an InputPeerChannel", ch.ID)
@@ -212,22 +198,77 @@ func markChannelRead(ctx context.Context, api *tg.Client, ch UnreadChannel) erro
 		},
 		MaxID: 0, // 0 = mark everything as read
 	})
-	return errors.Wrap(err, "channels.readHistory")
+	if err != nil {
+		return errors.Wrap(err, "channels.readHistory")
+	}
+
+	cache.markRead(ch.ID)
+
+	return nil
 }
 
 // markAllChannelsRead marks every unread channel as read and returns how many
 // channels were marked.
-func markAllChannelsRead(ctx context.Context, api *tg.Client) (int, error) {
-	channels, err := listUnreadChannels(ctx, api)
-	if err != nil {
-		return 0, errors.Wrap(err, "list unread channels")
-	}
+func markAllChannelsRead(ctx context.Context, api *tg.Client, cache *dialogCache) (int, error) {
+	channels := cache.unread()
 	for _, ch := range channels {
-		if err := markChannelRead(ctx, api, ch); err != nil {
+		if err := markChannelRead(ctx, api, cache, ch); err != nil {
 			return 0, errors.Wrapf(err, "mark channel %d (%s) as read", ch.ID, ch.Title)
 		}
 	}
+
 	return len(channels), nil
+}
+
+// registerCacheHandlers wires the update handlers that keep the dialog cache's
+// unread counts live, mirroring how tdlib maintains them from the update stream.
+func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache) {
+	d.OnNewChannelMessage(func(_ context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
+		msg, ok := u.Message.(*tg.Message)
+		if !ok {
+			// Service messages and the like do not count as unread here.
+			return nil
+		}
+		pc, ok := msg.PeerID.(*tg.PeerChannel)
+		if !ok {
+			return nil
+		}
+		if msg.Out {
+			// Our own message: not unread.
+			return nil
+		}
+
+		id := pc.ChannelID
+		cache.observeIncoming(id, func() (UnreadChannel, bool) {
+			c, ok := e.Channels[id]
+			if !ok {
+				return UnreadChannel{}, false
+			}
+			return channelFromEntity(c), true
+		})
+
+		return nil
+	})
+
+	d.OnReadChannelInbox(func(_ context.Context, _ tg.Entities, u *tg.UpdateReadChannelInbox) error {
+		cache.setRead(u.ChannelID, u.MaxID, u.StillUnreadCount)
+
+		return nil
+	})
+
+	d.OnDialogUnreadMark(func(_ context.Context, _ tg.Entities, u *tg.UpdateDialogUnreadMark) error {
+		peer, ok := u.Peer.(*tg.DialogPeer)
+		if !ok {
+			return nil
+		}
+		pc, ok := peer.Peer.(*tg.PeerChannel)
+		if !ok {
+			return nil
+		}
+		cache.setUnreadMark(pc.ChannelID, u.Unread)
+
+		return nil
+	})
 }
 
 func parseID(s string) (int64, bool) {
