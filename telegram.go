@@ -219,6 +219,11 @@ func channelFromDialog(elem dialogElem) (UnreadChannel, bool) {
 		return UnreadChannel{}, false
 	}
 
+	// Ignore group chats (supergroups): tgmcp tracks broadcast channels only.
+	if !c.Broadcast {
+		return UnreadChannel{}, false
+	}
+
 	username, _ := c.GetUsername()
 	return UnreadChannel{
 		ID:             c.ID,
@@ -349,6 +354,22 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 		}
 
 		id := pc.ChannelID
+
+		// Ignore new messages in group chats (supergroups): tgmcp tracks
+		// broadcast channels only.
+		broadcast := false
+		if c, ok := e.Channels[id]; ok {
+			broadcast = c.Broadcast
+		} else if ch, ok := cache.get(id); ok {
+			broadcast = ch.Broadcast
+		}
+		if !broadcast {
+			lg.Debug("New channel message ignored (chat)",
+				zap.Int64("channel_id", id), zap.Int("msg_id", msg.ID))
+
+			return nil
+		}
+
 		cache.observeIncoming(id, func() (UnreadChannel, bool) {
 			c, ok := e.Channels[id]
 			if !ok {

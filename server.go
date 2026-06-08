@@ -75,7 +75,7 @@ type markAllChannelsReadOutput struct {
 func (s *server) register(m *mcp.Server) {
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "list_unread_channels",
-		Description: "List Telegram channels and supergroups that currently have unread messages, with their unread counts.",
+		Description: "List Telegram broadcast channels that currently have unread messages, with their unread counts.",
 	}, logged(s.lg, "list_unread_channels", s.handleListChannels))
 
 	mcp.AddTool(m, &mcp.Tool{
@@ -85,12 +85,12 @@ func (s *server) register(m *mcp.Server) {
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "mark_channel_read",
-		Description: "Mark all messages in a specific Telegram channel or supergroup as read.",
+		Description: "Mark all messages in a specific Telegram broadcast channel as read.",
 	}, logged(s.lg, "mark_channel_read", s.handleMarkChannelRead))
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "mark_all_channels_read",
-		Description: "Mark all unread Telegram channels and supergroups as read in one call.",
+		Description: "Mark all unread Telegram broadcast channels as read in one call.",
 	}, logged(s.lg, "mark_all_channels_read", s.handleMarkAllChannelsRead))
 }
 

@@ -49,6 +49,11 @@ func (c *dialogCache) loadFromStore() (int, error) {
 
 	m := make(map[int64]UnreadChannel, len(chs))
 	for _, ch := range chs {
+		// Drop group chats (supergroups) persisted before tgmcp narrowed to
+		// broadcast channels only.
+		if !ch.Broadcast {
+			continue
+		}
 		m[ch.ID] = ch
 	}
 
@@ -56,7 +61,7 @@ func (c *dialogCache) loadFromStore() (int, error) {
 	c.channels = m
 	c.mu.Unlock()
 
-	return len(chs), nil
+	return len(m), nil
 }
 
 // replaceAll swaps the entire cache content and persists it. Used by the
