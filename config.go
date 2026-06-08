@@ -15,6 +15,7 @@ type Config struct {
 	AppHash    string
 	Phone      string
 	SessionDir string
+	HTTPAddr   string
 }
 
 // LoadConfig reads configuration from the environment, optionally sourcing a
@@ -23,11 +24,12 @@ type Config struct {
 // Required variables:
 //
 //	APP_ID, APP_HASH - obtained from https://my.telegram.org/apps
-//	TG_PHONE         - phone number in international format, e.g. +4123456789
 //
 // Optional:
 //
+//	TG_PHONE         - phone number in international format (used only to name the session folder)
 //	TG_SESSION_DIR   - directory to store the session (default: "./session")
+//	MCP_ADDR         - address for the MCP HTTP server to listen on (default: "127.0.0.1:8080")
 func LoadConfig() (Config, error) {
 	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
 		return Config{}, errors.Wrap(err, "load .env")
@@ -47,9 +49,6 @@ func LoadConfig() (Config, error) {
 	}
 
 	cfg.Phone = os.Getenv("TG_PHONE")
-	if cfg.Phone == "" {
-		return Config{}, errors.New("TG_PHONE is not set")
-	}
 
 	cfg.SessionDir = os.Getenv("TG_SESSION_DIR")
 	if cfg.SessionDir == "" {
@@ -57,17 +56,27 @@ func LoadConfig() (Config, error) {
 	}
 	cfg.SessionDir = filepath.Join(cfg.SessionDir, sessionFolder(cfg.Phone))
 
+	cfg.HTTPAddr = os.Getenv("MCP_ADDR")
+	if cfg.HTTPAddr == "" {
+		cfg.HTTPAddr = "127.0.0.1:8080"
+	}
+
 	return cfg, nil
 }
 
-// sessionFolder derives a stable directory name from a phone number, keeping
-// only its digits.
+// sessionFolder derives a stable subdirectory name from a phone number.
+// When phone is empty, "default" is returned.
 func sessionFolder(phone string) string {
+	if phone == "" {
+		return "default"
+	}
+
 	var out []rune
 	for _, r := range phone {
 		if r >= '0' && r <= '9' {
 			out = append(out, r)
 		}
 	}
+
 	return "phone-" + string(out)
 }

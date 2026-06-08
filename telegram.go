@@ -198,6 +198,38 @@ func authorName(msg *tg.Message, ent entities) string {
 	return name
 }
 
+// markChannelRead marks all messages in a channel as read up to and including
+// the latest message (MaxID=0 means "all messages").
+func markChannelRead(ctx context.Context, api *tg.Client, ch UnreadChannel) error {
+	ipc, ok := ch.peer.(*tg.InputPeerChannel)
+	if !ok {
+		return errors.Errorf("peer for channel %d is not an InputPeerChannel", ch.ID)
+	}
+	_, err := api.ChannelsReadHistory(ctx, &tg.ChannelsReadHistoryRequest{
+		Channel: &tg.InputChannel{
+			ChannelID:  ipc.ChannelID,
+			AccessHash: ipc.AccessHash,
+		},
+		MaxID: 0, // 0 = mark everything as read
+	})
+	return errors.Wrap(err, "channels.readHistory")
+}
+
+// markAllChannelsRead marks every unread channel as read and returns how many
+// channels were marked.
+func markAllChannelsRead(ctx context.Context, api *tg.Client) (int, error) {
+	channels, err := listUnreadChannels(ctx, api)
+	if err != nil {
+		return 0, errors.Wrap(err, "list unread channels")
+	}
+	for _, ch := range channels {
+		if err := markChannelRead(ctx, api, ch); err != nil {
+			return 0, errors.Wrapf(err, "mark channel %d (%s) as read", ch.ID, ch.Title)
+		}
+	}
+	return len(channels), nil
+}
+
 func parseID(s string) (int64, bool) {
 	id, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {

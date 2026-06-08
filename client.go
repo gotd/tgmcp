@@ -19,11 +19,20 @@ import (
 
 // newClient builds a Telegram client using the given configuration.
 //
-// Logs are written to a rotating file inside the session directory so that they
-// never interfere with the MCP JSON-RPC stream on stdout.
-func newClient(cfg Config) (*telegram.Client, *zap.Logger, error) {
+// handler is optional: when non-nil it is used as the update handler so that
+// callers (e.g. the QR auth flow) can wire in a dispatcher. Pass nil for the
+// default no-op handler.
+//
+// The returned waiter must wrap client.Run:
+//
+//	return waiter.Run(ctx, func(ctx context.Context) error {
+//	    return client.Run(ctx, handler)
+//	})
+//
+// Logs are written to a rotating file inside the session directory.
+func newClient(cfg Config, handler telegram.UpdateHandler) (*telegram.Client, *floodwait.Waiter, *zap.Logger, error) {
 	if err := os.MkdirAll(cfg.SessionDir, 0o700); err != nil {
-		return nil, nil, errors.Wrap(err, "create session dir")
+		return nil, nil, nil, errors.Wrap(err, "create session dir")
 	}
 
 	logWriter := zapcore.AddSync(&lj.Logger{
@@ -47,11 +56,12 @@ func newClient(cfg Config) (*telegram.Client, *zap.Logger, error) {
 		SessionStorage: &telegram.FileSessionStorage{
 			Path: filepath.Join(cfg.SessionDir, "session.json"),
 		},
+		UpdateHandler: handler,
 		Middlewares: []telegram.Middleware{
 			waiter,
 			ratelimit.New(rate.Every(time.Millisecond*100), 5),
 		},
 	})
 
-	return client, lg, nil
+	return client, waiter, lg, nil
 }

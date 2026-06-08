@@ -5,18 +5,21 @@
 // Usage:
 //
 //	tgmcp auth     # one-time interactive login, stores the session
-//	tgmcp serve    # run the MCP server over stdio
+//	tgmcp serve    # run the MCP server over HTTP
 package main
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -55,7 +58,7 @@ func rootCmd() *cobra.Command {
 		},
 		&cobra.Command{
 			Use:   "serve",
-			Short: "Run the MCP server over stdio",
+			Short: "Run the MCP server over HTTP",
 			Args:  cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				cfg, err := LoadConfig()
@@ -71,31 +74,56 @@ func rootCmd() *cobra.Command {
 }
 
 // runServe connects to Telegram using the stored session and serves the MCP
-// protocol over stdio. It never prompts: if the session is missing or expired,
-// it asks the user to run "tgmcp auth" first.
+// protocol over HTTP using the streamable transport. It never prompts: if the
+// session is missing or expired, it asks the user to run "tgmcp auth" first.
 func runServe(ctx context.Context, cfg Config) error {
-	client, lg, err := newClient(cfg)
+	client, waiter, lg, err := newClient(cfg, nil)
 	if err != nil {
 		return err
 	}
 
-	return client.Run(ctx, func(ctx context.Context) error {
-		status, err := client.Auth().Status(ctx)
-		if err != nil {
-			return errors.Wrap(err, "auth status")
-		}
-		if !status.Authorized {
-			return errors.New("not authorized: run `tgmcp auth` first to create a session")
-		}
-		lg.Info("Authorized, starting MCP server")
+	return waiter.Run(ctx, func(ctx context.Context) error {
+		return client.Run(ctx, func(ctx context.Context) error {
+			status, err := client.Auth().Status(ctx)
+			if err != nil {
+				return errors.Wrap(err, "auth status")
+			}
+			if !status.Authorized {
+				return errors.New("not authorized: run `tgmcp auth` first to create a session")
+			}
 
-		srv := &server{api: client.API()}
-		m := mcp.NewServer(&mcp.Implementation{
-			Name:    "tgmcp",
-			Version: "0.1.0",
-		}, nil)
-		srv.register(m)
+			srv := &server{api: client.API()}
+			m := mcp.NewServer(&mcp.Implementation{
+				Name:    "tgmcp",
+				Version: "0.1.0",
+			}, nil)
+			srv.register(m)
 
-		return m.Run(ctx, &mcp.StdioTransport{})
+			handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+				return m
+			}, nil)
+			httpSrv := &http.Server{
+				Addr:              cfg.HTTPAddr,
+				Handler:           handler,
+				ReadHeaderTimeout: 10 * time.Second,
+			}
+
+			go func() {
+				<-ctx.Done()
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+					lg.Error("Shutdown MCP HTTP server", zap.Error(err))
+				}
+			}()
+
+			lg.Info("Authorized, serving MCP over HTTP", zap.String("addr", cfg.HTTPAddr))
+
+			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				return errors.Wrap(err, "http serve")
+			}
+
+			return nil
+		})
 	})
 }
