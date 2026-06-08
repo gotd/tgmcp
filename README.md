@@ -99,6 +99,7 @@ Point your MCP client at the HTTP endpoint (adjust the address to `MCP_ADDR`):
   invocation.
 - Unread detection compares each message ID against the dialog's
   `read_inbox_max_id`; messages newer than that boundary are returned.
-- After a long disconnect, a channel whose difference is too long to recover is
-  resynced automatically (`messages.getPeerDialogs`). Deleting
-  `<session>/updates.bolt` forces a clean re-bootstrap on the next start.
+- After a long disconnect, a too-long difference is resynced automatically: a
+  single channel via `messages.getPeerDialogs`, or the whole list via a full
+  re-bootstrap. Deleting `<session>/updates.bolt` forces a clean re-bootstrap on
+  the next start.

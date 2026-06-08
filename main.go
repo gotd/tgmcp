@@ -126,6 +126,19 @@ func runServe(ctx context.Context, cfg Config) error {
 				}
 			}()
 		},
+		OnTooLong: func() {
+			if api == nil {
+				return
+			}
+			// Account-wide gap too long to recover: re-load the whole list.
+			go func() {
+				if err := bootstrapDialogs(ctx, api, cache); err != nil {
+					lg.Warn("Re-bootstrap dialogs after difference too long", zap.Error(err))
+					return
+				}
+				lg.Info("Re-bootstrapped dialogs after difference too long")
+			}()
+		},
 		Logger: lg.Named("updates"),
 	})
 
