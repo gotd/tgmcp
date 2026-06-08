@@ -5,13 +5,13 @@ go 1.26.3
 require (
 	github.com/go-faster/errors v0.7.1
 	github.com/gotd/contrib v0.21.1
-	github.com/gotd/td v0.131.0
+	github.com/gotd/td v0.145.2
 	github.com/joho/godotenv v1.5.1
+	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/spf13/cobra v1.10.2
 	go.uber.org/zap v1.28.0
 	golang.org/x/time v0.15.0
-	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (
@@ -32,7 +32,6 @@ require (
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mdp/qrterminal/v3 v3.2.1 // indirect
 	github.com/ogen-go/ogen v1.20.3 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect

@@ -12,7 +12,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/time/rate"
-	lj "gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/gotd/td/telegram"
 )
@@ -29,23 +28,18 @@ import (
 //	    return client.Run(ctx, handler)
 //	})
 //
-// Logs are written to a rotating file inside the session directory.
+// Logs are written as JSON to stderr so that journald (or any supervisor) captures them.
 func newClient(cfg Config, handler telegram.UpdateHandler) (*telegram.Client, *floodwait.Waiter, *zap.Logger, error) {
 	if err := os.MkdirAll(cfg.SessionDir, 0o700); err != nil {
 		return nil, nil, nil, errors.Wrap(err, "create session dir")
 	}
 
-	logWriter := zapcore.AddSync(&lj.Logger{
-		Filename:   filepath.Join(cfg.SessionDir, "log.jsonl"),
-		MaxBackups: 3,
-		MaxSize:    1, // megabytes
-		MaxAge:     7, // days
-	})
-	lg := zap.New(zapcore.NewCore(
-		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
-		logWriter,
-		zap.InfoLevel,
-	))
+	logCfg := zap.NewProductionConfig()
+	logCfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	lg, err := logCfg.Build()
+	if err != nil {
+		return nil, nil, nil, errors.Wrap(err, "build logger")
+	}
 
 	waiter := floodwait.NewWaiter().WithCallback(func(ctx context.Context, wait floodwait.FloodWait) {
 		lg.Warn("Flood wait", zap.Duration("wait", wait.Duration))
