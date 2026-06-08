@@ -76,8 +76,11 @@ func (h accessHasher) GetChannelAccessHash(_ context.Context, _, channelID int64
 
 		return nil
 	})
+	if err != nil {
+		return 0, false, errors.Wrap(err, "get access hash")
+	}
 
-	return hash, found, errors.Wrap(err, "get access hash")
+	return hash, found, nil
 }
 
 // dialogStore persists the dialog cache to bbolt so that the dialog list does
@@ -199,8 +202,11 @@ func (d *dialogStore) load() ([]UnreadChannel, error) {
 			return nil
 		})
 	})
+	if err != nil {
+		return nil, errors.Wrap(err, "load dialogs")
+	}
 
-	return out, errors.Wrap(err, "load dialogs")
+	return out, nil
 }
 
 func i64b(v int64) []byte {
