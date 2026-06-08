@@ -5,7 +5,7 @@ go 1.26.3
 require (
 	github.com/go-faster/errors v0.7.1
 	github.com/gotd/contrib v0.21.1
-	github.com/gotd/td v0.146.0
+	github.com/gotd/td v0.147.0
 	github.com/joho/godotenv v1.5.1
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1

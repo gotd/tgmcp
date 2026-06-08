@@ -127,6 +127,13 @@ func runServe(ctx context.Context, cfg Config) error {
 				}
 			}()
 		},
+		OnChannelInaccessible: func(channelID int64) {
+			// The updates manager lost access to the channel (CHANNEL_PRIVATE)
+			// and dropped it from tracking; drop it from the dialog cache too.
+			cache.remove(channelID)
+			lg.Info("Dropped inaccessible channel from cache",
+				zap.Int64("channel_id", channelID))
+		},
 		OnTooLong: func() {
 			if api == nil {
 				return
