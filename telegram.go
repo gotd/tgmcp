@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -328,12 +329,13 @@ const messageBufferCap = 200
 
 // registerCacheHandlers wires the update handlers that keep the dialog cache's
 // unread counts and the per-channel message buffer live, mirroring how tdlib
-// maintains them from the update stream.
-func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *messageStore) {
+// maintains them from the update stream. Each processed update is logged at
+// debug level with structured fields.
+func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *messageStore, lg *zap.Logger) {
 	d.OnNewChannelMessage(func(_ context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
 		msg, ok := u.Message.(*tg.Message)
 		if !ok {
-			// Service messages and the like do not count as unread here.
+			lg.Debug("New channel message ignored", zap.String("type", fmt.Sprintf("%T", u.Message)))
 			return nil
 		}
 		pc, ok := msg.PeerID.(*tg.PeerChannel)
@@ -341,7 +343,8 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 			return nil
 		}
 		if msg.Out {
-			// Our own message: not unread.
+			lg.Debug("New channel message (own, skipped)",
+				zap.Int64("channel_id", pc.ChannelID), zap.Int("msg_id", msg.ID))
 			return nil
 		}
 
@@ -355,11 +358,21 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 		})
 
 		// Buffer the body so read_channel_unread can serve it without an RPC.
+		buffered := false
 		if msgs != nil {
 			if err := msgs.append(id, messageFromTG(msg, peer.EntitiesFromUpdate(e))); err != nil {
 				cache.lg.Warn("Buffer message", zap.Int64("id", id), zap.Error(err))
+			} else {
+				buffered = true
 			}
 		}
+
+		lg.Debug("New channel message",
+			zap.Int64("channel_id", id),
+			zap.Int("msg_id", msg.ID),
+			zap.Int("len", len(msg.Message)),
+			zap.Bool("buffered", buffered),
+		)
 
 		return nil
 	})
@@ -380,6 +393,9 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 			cache.lg.Warn("Edit buffered message", zap.Int64("id", pc.ChannelID), zap.Error(err))
 		}
 
+		lg.Debug("Edit channel message",
+			zap.Int64("channel_id", pc.ChannelID), zap.Int("msg_id", msg.ID))
+
 		return nil
 	})
 
@@ -391,6 +407,9 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 			cache.lg.Warn("Delete buffered messages", zap.Int64("id", u.ChannelID), zap.Error(err))
 		}
 
+		lg.Debug("Delete channel messages",
+			zap.Int64("channel_id", u.ChannelID), zap.Int("count", len(u.Messages)))
+
 		return nil
 	})
 
@@ -401,6 +420,12 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 				cache.lg.Warn("Prune buffered messages", zap.Int64("id", u.ChannelID), zap.Error(err))
 			}
 		}
+
+		lg.Debug("Read channel inbox",
+			zap.Int64("channel_id", u.ChannelID),
+			zap.Int("max_id", u.MaxID),
+			zap.Int("still_unread", u.StillUnreadCount),
+		)
 
 		return nil
 	})
@@ -415,6 +440,9 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *mes
 			return nil
 		}
 		cache.setUnreadMark(pc.ChannelID, u.Unread)
+
+		lg.Debug("Dialog unread mark",
+			zap.Int64("channel_id", pc.ChannelID), zap.Bool("unread", u.Unread))
 
 		return nil
 	})

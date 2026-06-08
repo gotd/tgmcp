@@ -106,7 +106,7 @@ func runServe(ctx context.Context, cfg Config) error {
 	msgs := &messageStore{db: db, cap: messageBufferCap}
 
 	dispatcher := tg.NewUpdateDispatcher()
-	registerCacheHandlers(&dispatcher, cache, msgs)
+	registerCacheHandlers(&dispatcher, cache, msgs, lg.Named("update"))
 
 	// api is set once the client is connected; the OnChannelTooLong callback
 	// (invoked later, from the updates manager) refetches the affected channel.
