@@ -15,6 +15,7 @@ import (
 type server struct {
 	api   *tg.Client
 	cache *dialogCache
+	msgs  *messageStore
 	lg    *zap.Logger
 }
 
@@ -101,7 +102,7 @@ func (s *server) handleReadChannel(ctx context.Context, _ *mcp.CallToolRequest, 
 	if in.Channel == "" {
 		return nil, readChannelOutput{}, errors.New("channel is required")
 	}
-	ch, msgs, err := readUnread(ctx, s.api, s.cache, in.Channel, in.Limit)
+	ch, msgs, err := readUnread(ctx, s.api, s.cache, s.msgs, in.Channel, in.Limit)
 	if err != nil {
 		return nil, readChannelOutput{}, err
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-faster/errors"
+	"go.uber.org/zap"
 
 	"github.com/gotd/td/telegram/message/peer"
 	"github.com/gotd/td/telegram/query"
@@ -118,7 +119,13 @@ func refreshChannel(ctx context.Context, api *tg.Client, cache *dialogCache, cha
 
 // readUnread returns the unread messages of a channel, newest first, capped at
 // limit. A non-positive limit defaults to 50.
-func readUnread(ctx context.Context, api *tg.Client, cache *dialogCache, target string, limit int) (UnreadChannel, []Message, error) {
+//
+// It serves from the in-process message buffer (fed by the update stream) when
+// that holds enough of the newest unread messages, avoiding a getHistory RPC.
+// Otherwise it falls back to messages.getHistory and backfills the buffer so the
+// next read is free. This mirrors tdlib, which serves history locally and only
+// hits the server to fill gaps.
+func readUnread(ctx context.Context, api *tg.Client, cache *dialogCache, msgs *messageStore, target string, limit int) (UnreadChannel, []Message, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -128,6 +135,42 @@ func readUnread(ctx context.Context, api *tg.Client, cache *dialogCache, target 
 		return UnreadChannel{}, nil, errors.Errorf("channel %q not found in dialogs", target)
 	}
 
+	// Buffer first: the buffer always holds a contiguous newest suffix, so it is
+	// authoritative when it has at least `limit` unread, or all of them.
+	if msgs != nil {
+		buffered, err := msgs.load(ch.ID, ch.readInboxMaxID, 0)
+		if err != nil {
+			cache.lg.Warn("Load buffered messages", zap.Int64("id", ch.ID), zap.Error(err))
+		} else if len(buffered) >= limit || len(buffered) >= ch.UnreadCount {
+			if len(buffered) > limit {
+				buffered = buffered[:limit]
+			}
+
+			return ch, buffered, nil
+		}
+	}
+
+	out, err := fetchUnreadHistory(ctx, api, cache, ch, limit)
+	if err != nil {
+		return UnreadChannel{}, nil, err
+	}
+
+	// Backfill so subsequent reads of this channel are served from the buffer.
+	if msgs != nil {
+		for _, m := range out {
+			if err := msgs.append(ch.ID, m); err != nil {
+				cache.lg.Warn("Backfill buffered message", zap.Int64("id", ch.ID), zap.Error(err))
+				break
+			}
+		}
+	}
+
+	return ch, out, nil
+}
+
+// fetchUnreadHistory pulls the unread messages of a channel from the server,
+// newest first, capped at limit.
+func fetchUnreadHistory(ctx context.Context, api *tg.Client, cache *dialogCache, ch UnreadChannel, limit int) ([]Message, error) {
 	var out []Message
 	iter := messages.NewQueryBuilder(api).GetHistory(ch.peer).Iter()
 	for iter.Next(ctx) {
@@ -150,13 +193,13 @@ func readUnread(ctx context.Context, api *tg.Client, cache *dialogCache, target 
 		if isChannelGone(err) {
 			cache.remove(ch.ID)
 
-			return UnreadChannel{}, nil, errors.Errorf("channel %q is no longer accessible", target)
+			return nil, errors.Errorf("channel %d is no longer accessible", ch.ID)
 		}
 
-		return UnreadChannel{}, nil, errors.Wrap(err, "fetch history")
+		return nil, errors.Wrap(err, "fetch history")
 	}
 
-	return ch, out, nil
+	return out, nil
 }
 
 // channelFromDialog extracts channel information from a dialog element,
@@ -280,9 +323,13 @@ func markAllChannelsRead(ctx context.Context, api *tg.Client, cache *dialogCache
 	return len(channels), nil
 }
 
+// messageBufferCap bounds how many recent messages are buffered per channel.
+const messageBufferCap = 200
+
 // registerCacheHandlers wires the update handlers that keep the dialog cache's
-// unread counts live, mirroring how tdlib maintains them from the update stream.
-func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache) {
+// unread counts and the per-channel message buffer live, mirroring how tdlib
+// maintains them from the update stream.
+func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache, msgs *messageStore) {
 	d.OnNewChannelMessage(func(_ context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
 		msg, ok := u.Message.(*tg.Message)
 		if !ok {
@@ -307,11 +354,53 @@ func registerCacheHandlers(d *tg.UpdateDispatcher, cache *dialogCache) {
 			return channelFromEntity(c), true
 		})
 
+		// Buffer the body so read_channel_unread can serve it without an RPC.
+		if msgs != nil {
+			if err := msgs.append(id, messageFromTG(msg, peer.EntitiesFromUpdate(e))); err != nil {
+				cache.lg.Warn("Buffer message", zap.Int64("id", id), zap.Error(err))
+			}
+		}
+
+		return nil
+	})
+
+	d.OnEditChannelMessage(func(_ context.Context, e tg.Entities, u *tg.UpdateEditChannelMessage) error {
+		if msgs == nil {
+			return nil
+		}
+		msg, ok := u.Message.(*tg.Message)
+		if !ok {
+			return nil
+		}
+		pc, ok := msg.PeerID.(*tg.PeerChannel)
+		if !ok {
+			return nil
+		}
+		if err := msgs.edit(pc.ChannelID, messageFromTG(msg, peer.EntitiesFromUpdate(e))); err != nil {
+			cache.lg.Warn("Edit buffered message", zap.Int64("id", pc.ChannelID), zap.Error(err))
+		}
+
+		return nil
+	})
+
+	d.OnDeleteChannelMessages(func(_ context.Context, _ tg.Entities, u *tg.UpdateDeleteChannelMessages) error {
+		if msgs == nil {
+			return nil
+		}
+		if err := msgs.deleteMessages(u.ChannelID, u.Messages); err != nil {
+			cache.lg.Warn("Delete buffered messages", zap.Int64("id", u.ChannelID), zap.Error(err))
+		}
+
 		return nil
 	})
 
 	d.OnReadChannelInbox(func(_ context.Context, _ tg.Entities, u *tg.UpdateReadChannelInbox) error {
 		cache.setRead(u.ChannelID, u.MaxID, u.StillUnreadCount)
+		if msgs != nil {
+			if err := msgs.pruneRead(u.ChannelID, u.MaxID); err != nil {
+				cache.lg.Warn("Prune buffered messages", zap.Int64("id", u.ChannelID), zap.Error(err))
+			}
+		}
 
 		return nil
 	})

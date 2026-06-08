@@ -143,3 +143,134 @@ func TestAccessHasher(t *testing.T) {
 		t.Fatalf("get hit: got found=%v hash=%d, want found=true hash=123456", found, hash)
 	}
 }
+
+func msg(id int) Message {
+	return Message{ID: id, Text: "m"}
+}
+
+func msgIDs(ms []Message) []int {
+	ids := make([]int, len(ms))
+	for i, m := range ms {
+		ids[i] = m.ID
+	}
+
+	return ids
+}
+
+func TestMessageStoreAppendAndLoad(t *testing.T) {
+	store := &messageStore{db: openTestDB(t), cap: 100}
+
+	for _, id := range []int{5, 1, 3, 2, 4} {
+		if err := store.append(7, msg(id)); err != nil {
+			t.Fatalf("append %d: %v", id, err)
+		}
+	}
+
+	// Load on an empty/unknown channel must be (nil, nil).
+	got, err := store.load(999, 0, 0)
+	if err != nil {
+		t.Fatalf("load unknown: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("load unknown: got %d, want 0", len(got))
+	}
+
+	// Newest first.
+	got, err = store.load(7, 0, 0)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if want := []int{5, 4, 3, 2, 1}; !equalInts(msgIDs(got), want) {
+		t.Fatalf("load order: got %v, want %v", msgIDs(got), want)
+	}
+
+	// afterID excludes read messages; limit caps the result.
+	got, _ = store.load(7, 2, 2)
+	if want := []int{5, 4}; !equalInts(msgIDs(got), want) {
+		t.Fatalf("load after=2 limit=2: got %v, want %v", msgIDs(got), want)
+	}
+}
+
+func TestMessageStoreCapTrim(t *testing.T) {
+	store := &messageStore{db: openTestDB(t), cap: 3}
+
+	for id := 1; id <= 6; id++ {
+		if err := store.append(7, msg(id)); err != nil {
+			t.Fatalf("append %d: %v", id, err)
+		}
+	}
+
+	got, _ := store.load(7, 0, 0)
+	if want := []int{6, 5, 4}; !equalInts(msgIDs(got), want) {
+		t.Fatalf("cap trim: got %v, want %v (oldest dropped)", msgIDs(got), want)
+	}
+}
+
+func TestMessageStoreEditDeletePrune(t *testing.T) {
+	store := &messageStore{db: openTestDB(t), cap: 100}
+	for id := 1; id <= 5; id++ {
+		if err := store.append(7, msg(id)); err != nil {
+			t.Fatalf("append %d: %v", id, err)
+		}
+	}
+
+	// Edit overwrites a buffered message; editing an unknown ID is a no-op.
+	if err := store.edit(7, Message{ID: 3, Text: "edited"}); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	if err := store.edit(7, Message{ID: 99, Text: "ghost"}); err != nil {
+		t.Fatalf("edit unknown: %v", err)
+	}
+	got, _ := store.load(7, 0, 0)
+	if len(got) != 5 {
+		t.Fatalf("after edit: got %d messages, want 5", len(got))
+	}
+	for _, m := range got {
+		if m.ID == 3 && m.Text != "edited" {
+			t.Fatalf("edit not applied: %+v", m)
+		}
+		if m.ID == 99 {
+			t.Fatalf("edit of unknown id resurrected message")
+		}
+	}
+
+	// Delete by ID.
+	if err := store.deleteMessages(7, []int{2, 4}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	got, _ = store.load(7, 0, 0)
+	if want := []int{5, 3, 1}; !equalInts(msgIDs(got), want) {
+		t.Fatalf("after delete: got %v, want %v", msgIDs(got), want)
+	}
+
+	// Prune read messages (ID <= 3).
+	if err := store.pruneRead(7, 3); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	got, _ = store.load(7, 0, 0)
+	if want := []int{5}; !equalInts(msgIDs(got), want) {
+		t.Fatalf("after prune: got %v, want %v", msgIDs(got), want)
+	}
+
+	// deleteChannel clears everything.
+	if err := store.deleteChannel(7); err != nil {
+		t.Fatalf("deleteChannel: %v", err)
+	}
+	got, _ = store.load(7, 0, 0)
+	if len(got) != 0 {
+		t.Fatalf("after deleteChannel: got %d, want 0", len(got))
+	}
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
+}

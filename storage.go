@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -22,6 +23,8 @@ var (
 	accessHashBucket = []byte("access_hash")
 	// dialogsBucket holds the persisted dialog cache, keyed by channel ID.
 	dialogsBucket = []byte("dialogs")
+	// messagesBucket holds per-channel sub-buckets of buffered unread messages.
+	messagesBucket = []byte("messages")
 )
 
 // openStateDB opens (creating if needed) the bbolt database used to persist the
@@ -219,6 +222,203 @@ func (d *dialogStore) load() ([]UnreadChannel, error) {
 	}
 
 	return out, nil
+}
+
+// messageStore buffers recent unread messages per channel so that
+// read_channel_unread can be served without a messages.getHistory RPC. Messages
+// arrive for free on the update stream (updateNewChannelMessage, and the same
+// after getDifference); this mirrors tdlib, which serves history from its local
+// store and only hits the server to fill gaps.
+//
+// Layout: messagesBucket -> per-channel sub-bucket keyed by i64b(channelID) ->
+// message ID (big-endian, so keys sort by ID) -> JSON Message.
+type messageStore struct {
+	db  *bolt.DB
+	cap int // max buffered messages per channel; older ones are trimmed.
+}
+
+// msgKey encodes a message ID as a big-endian key so bbolt iterates in ID order.
+func msgKey(id int) []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, uint64(id))
+
+	return b
+}
+
+// channelBucket returns the per-channel message sub-bucket, creating it (and the
+// root) when create is set. Returns nil when it does not exist and create is
+// false.
+func channelBucket(tx *bolt.Tx, channelID int64, create bool) (*bolt.Bucket, error) {
+	if !create {
+		root := tx.Bucket(messagesBucket)
+		if root == nil {
+			return nil, nil
+		}
+
+		return root.Bucket(i64b(channelID)), nil
+	}
+
+	root, err := tx.CreateBucketIfNotExists(messagesBucket)
+	if err != nil {
+		return nil, errors.Wrap(err, "root bucket")
+	}
+	b, err := root.CreateBucketIfNotExists(i64b(channelID))
+	if err != nil {
+		return nil, errors.Wrap(err, "channel bucket")
+	}
+
+	return b, nil
+}
+
+// append buffers an incoming message, trimming the oldest beyond the cap.
+func (s *messageStore) append(channelID int64, m Message) error {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return errors.Wrap(err, "marshal message")
+	}
+
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b, err := channelBucket(tx, channelID, true)
+		if err != nil {
+			return err
+		}
+		if err := b.Put(msgKey(m.ID), data); err != nil {
+			return errors.Wrap(err, "put message")
+		}
+
+		return trimOldest(b, s.cap)
+	})
+}
+
+// edit overwrites a buffered message in place. Messages that are not buffered
+// (already read/pruned, or never seen) are ignored.
+func (s *messageStore) edit(channelID int64, m Message) error {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return errors.Wrap(err, "marshal message")
+	}
+
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b, err := channelBucket(tx, channelID, false)
+		if err != nil || b == nil {
+			return err
+		}
+		if b.Get(msgKey(m.ID)) == nil {
+			return nil
+		}
+		if err := b.Put(msgKey(m.ID), data); err != nil {
+			return errors.Wrap(err, "put message")
+		}
+
+		return nil
+	})
+}
+
+// deleteMessages drops buffered messages by ID.
+func (s *messageStore) deleteMessages(channelID int64, ids []int) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b, err := channelBucket(tx, channelID, false)
+		if err != nil || b == nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := b.Delete(msgKey(id)); err != nil {
+				return errors.Wrap(err, "delete message")
+			}
+		}
+
+		return nil
+	})
+}
+
+// pruneRead drops buffered messages that are now read (ID <= maxID).
+func (s *messageStore) pruneRead(channelID int64, maxID int) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b, err := channelBucket(tx, channelID, false)
+		if err != nil || b == nil {
+			return err
+		}
+
+		max := msgKey(maxID)
+		var keys [][]byte
+		c := b.Cursor()
+		for k, _ := c.First(); k != nil && bytes.Compare(k, max) <= 0; k, _ = c.Next() {
+			keys = append(keys, append([]byte(nil), k...))
+		}
+		for _, k := range keys {
+			if err := b.Delete(k); err != nil {
+				return errors.Wrap(err, "prune message")
+			}
+		}
+
+		return nil
+	})
+}
+
+// deleteChannel drops the whole message buffer of a channel.
+func (s *messageStore) deleteChannel(channelID int64) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		root := tx.Bucket(messagesBucket)
+		if root == nil {
+			return nil
+		}
+		if err := root.DeleteBucket(i64b(channelID)); err != nil && !errors.Is(err, bolterrors.ErrBucketNotFound) {
+			return errors.Wrap(err, "delete channel messages")
+		}
+
+		return nil
+	})
+}
+
+// load returns buffered unread messages (ID > afterID), newest first. A positive
+// limit caps the result; limit <= 0 returns all buffered unread messages.
+func (s *messageStore) load(channelID int64, afterID, limit int) ([]Message, error) {
+	var out []Message
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b, err := channelBucket(tx, channelID, false)
+		if err != nil || b == nil {
+			return err
+		}
+
+		after := msgKey(afterID)
+		c := b.Cursor()
+		for k, v := c.Last(); k != nil && bytes.Compare(k, after) > 0; k, v = c.Prev() {
+			var m Message
+			if err := json.Unmarshal(v, &m); err != nil {
+				return errors.Wrap(err, "unmarshal message")
+			}
+			out = append(out, m)
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "load messages")
+	}
+
+	return out, nil
+}
+
+// trimOldest deletes the lowest-ID (oldest) messages until at most max remain.
+func trimOldest(b *bolt.Bucket, max int) error {
+	var keys [][]byte
+	c := b.Cursor()
+	for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		keys = append(keys, append([]byte(nil), k...))
+	}
+	if len(keys) <= max {
+		return nil
+	}
+	for _, k := range keys[:len(keys)-max] {
+		if err := b.Delete(k); err != nil {
+			return errors.Wrap(err, "trim message")
+		}
+	}
+
+	return nil
 }
 
 func i64b(v int64) []byte {
