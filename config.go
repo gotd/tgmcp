@@ -16,6 +16,7 @@ type Config struct {
 	Phone      string
 	SessionDir string
 	HTTPAddr   string
+	LogLevel   string
 }
 
 // LoadConfig reads configuration from the environment, optionally sourcing a
@@ -30,6 +31,7 @@ type Config struct {
 //	TG_PHONE         - phone number in international format (used only to name the session folder)
 //	TG_SESSION_DIR   - directory to store the session (default: "./session")
 //	MCP_ADDR         - address for the MCP HTTP server to listen on (default: "127.0.0.1:8080")
+//	LOG_LEVEL        - log level: debug, info, warn, error (default: "info")
 func LoadConfig() (Config, error) {
 	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
 		return Config{}, errors.Wrap(err, "load .env")
@@ -59,6 +61,11 @@ func LoadConfig() (Config, error) {
 	cfg.HTTPAddr = os.Getenv("MCP_ADDR")
 	if cfg.HTTPAddr == "" {
 		cfg.HTTPAddr = "127.0.0.1:8080"
+	}
+
+	cfg.LogLevel = os.Getenv("LOG_LEVEL")
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = "info"
 	}
 
 	return cfg, nil

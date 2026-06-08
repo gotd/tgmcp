@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.uber.org/zap"
 
 	"github.com/gotd/td/tg"
 )
@@ -12,6 +14,27 @@ import (
 // server holds the dependencies shared by the MCP tool handlers.
 type server struct {
 	api *tg.Client
+	lg  *zap.Logger
+}
+
+// logged wraps a typed tool handler so that every tool call is logged at debug
+// level with its input, output, duration, and any error.
+func logged[In, Out any](lg *zap.Logger, name string, h mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
+	return func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
+		start := time.Now()
+		lg.Debug("Tool call", zap.String("tool", name), zap.Any("input", in))
+
+		res, out, err := h(ctx, req, in)
+
+		lg.Debug("Tool done",
+			zap.String("tool", name),
+			zap.Duration("took", time.Since(start)),
+			zap.Any("output", out),
+			zap.Error(err),
+		)
+
+		return res, out, err
+	}
 }
 
 // listChannelsInput has no parameters.
@@ -51,22 +74,22 @@ func (s *server) register(m *mcp.Server) {
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "list_unread_channels",
 		Description: "List Telegram channels and supergroups that currently have unread messages, with their unread counts.",
-	}, s.handleListChannels)
+	}, logged(s.lg, "list_unread_channels", s.handleListChannels))
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "read_channel_unread",
 		Description: "Read the unread messages of a Telegram channel, newest first. Reading does not mark them as read.",
-	}, s.handleReadChannel)
+	}, logged(s.lg, "read_channel_unread", s.handleReadChannel))
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "mark_channel_read",
 		Description: "Mark all messages in a specific Telegram channel or supergroup as read.",
-	}, s.handleMarkChannelRead)
+	}, logged(s.lg, "mark_channel_read", s.handleMarkChannelRead))
 
 	mcp.AddTool(m, &mcp.Tool{
 		Name:        "mark_all_channels_read",
 		Description: "Mark all unread Telegram channels and supergroups as read in one call.",
-	}, s.handleMarkAllChannelsRead)
+	}, logged(s.lg, "mark_all_channels_read", s.handleMarkAllChannelsRead))
 }
 
 func (s *server) handleListChannels(ctx context.Context, _ *mcp.CallToolRequest, _ listChannelsInput) (*mcp.CallToolResult, listChannelsOutput, error) {

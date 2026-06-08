@@ -92,7 +92,7 @@ func runServe(ctx context.Context, cfg Config) error {
 				return errors.New("not authorized: run `tgmcp auth` first to create a session")
 			}
 
-			srv := &server{api: client.API()}
+			srv := &server{api: client.API(), lg: lg}
 			m := mcp.NewServer(&mcp.Implementation{
 				Name:    "tgmcp",
 				Version: "0.1.0",
@@ -104,7 +104,7 @@ func runServe(ctx context.Context, cfg Config) error {
 			}, nil)
 			httpSrv := &http.Server{
 				Addr:              cfg.HTTPAddr,
-				Handler:           handler,
+				Handler:           logHTTP(lg, handler),
 				ReadHeaderTimeout: 10 * time.Second,
 			}
 
@@ -125,5 +125,36 @@ func runServe(ctx context.Context, cfg Config) error {
 
 			return nil
 		})
+	})
+}
+
+// statusRecorder captures the HTTP status code written by a handler.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// logHTTP wraps an http.Handler and logs every request at debug level with its
+// method, path, MCP session id, status, and duration.
+func logHTTP(lg *zap.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		next.ServeHTTP(rec, r)
+
+		lg.Debug("HTTP request",
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+			zap.String("session", r.Header.Get("Mcp-Session-Id")),
+			zap.Int("status", rec.status),
+			zap.Duration("took", time.Since(start)),
+			zap.String("remote", r.RemoteAddr),
+		)
 	})
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -13,7 +14,9 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/time/rate"
 
+	"github.com/gotd/td/bin"
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/tg"
 )
 
 // newClient builds a Telegram client using the given configuration.
@@ -34,7 +37,13 @@ func newClient(cfg Config, handler telegram.UpdateHandler) (*telegram.Client, *f
 		return nil, nil, nil, errors.Wrap(err, "create session dir")
 	}
 
+	level, err := zapcore.ParseLevel(cfg.LogLevel)
+	if err != nil {
+		return nil, nil, nil, errors.Wrapf(err, "parse log level %q", cfg.LogLevel)
+	}
+
 	logCfg := zap.NewProductionConfig()
+	logCfg.Level = zap.NewAtomicLevelAt(level)
 	logCfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	lg, err := logCfg.Build()
 	if err != nil {
@@ -52,10 +61,30 @@ func newClient(cfg Config, handler telegram.UpdateHandler) (*telegram.Client, *f
 		},
 		UpdateHandler: handler,
 		Middlewares: []telegram.Middleware{
+			invokeLogger(lg),
 			waiter,
 			ratelimit.New(rate.Every(time.Millisecond*100), 5),
 		},
 	})
 
 	return client, waiter, lg, nil
+}
+
+// invokeLogger is a Telegram middleware that logs every MTProto RPC call at
+// debug level, including the request type, duration, and any error.
+func invokeLogger(lg *zap.Logger) telegram.Middleware {
+	return telegram.MiddlewareFunc(func(next tg.Invoker) telegram.InvokeFunc {
+		return func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+			start := time.Now()
+			err := next.Invoke(ctx, input, output)
+
+			lg.Debug("MTProto call",
+				zap.String("method", fmt.Sprintf("%T", input)),
+				zap.Duration("took", time.Since(start)),
+				zap.Error(err),
+			)
+
+			return err
+		}
+	})
 }
