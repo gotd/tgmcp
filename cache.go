@@ -114,6 +114,26 @@ func (c *dialogCache) find(target string) (UnreadChannel, bool) {
 	return UnreadChannel{}, false
 }
 
+// get returns a cached channel by ID.
+func (c *dialogCache) get(id int64) (UnreadChannel, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	ch, ok := c.channels[id]
+
+	return ch, ok
+}
+
+// set upserts a fully-resolved channel and persists it. Used to resync a single
+// channel after a too-long difference.
+func (c *dialogCache) set(ch UnreadChannel) {
+	c.mu.Lock()
+	c.channels[ch.ID] = ch
+	c.mu.Unlock()
+
+	c.persist(ch)
+}
+
 // observeIncoming records an incoming message in a channel. If the channel is
 // already cached its unread count is incremented; otherwise build is called to
 // resolve channel metadata (from update entities) and the channel is inserted

@@ -107,11 +107,26 @@ func runServe(ctx context.Context, cfg Config) error {
 	dispatcher := tg.NewUpdateDispatcher()
 	registerCacheHandlers(&dispatcher, cache)
 
+	// api is set once the client is connected; the OnChannelTooLong callback
+	// (invoked later, from the updates manager) refetches the affected channel.
+	var api *tg.Client
 	mgr := updates.New(updates.Config{
 		Handler:      dispatcher,
 		Storage:      bbolt.NewStateStorage(db),
 		AccessHasher: accessHasher{db: db},
-		Logger:       lg.Named("updates"),
+		OnChannelTooLong: func(channelID int64) {
+			if api == nil {
+				return
+			}
+			// Refresh asynchronously so we do not block update processing.
+			go func() {
+				if err := refreshChannel(ctx, api, cache, channelID); err != nil {
+					lg.Warn("Refresh channel after difference too long",
+						zap.Int64("channel_id", channelID), zap.Error(err))
+				}
+			}()
+		},
+		Logger: lg.Named("updates"),
 	})
 
 	client, waiter, err := newClient(cfg, mgr, lg)
@@ -133,6 +148,10 @@ func runServe(ctx context.Context, cfg Config) error {
 			if err != nil {
 				return errors.Wrap(err, "self")
 			}
+
+			// Publish the API for the OnChannelTooLong callback. Set before the
+			// updates manager starts, so it is visible by the time updates flow.
+			api = client.API()
 
 			srv := &server{api: client.API(), cache: cache, lg: lg}
 			m := mcp.NewServer(&mcp.Implementation{

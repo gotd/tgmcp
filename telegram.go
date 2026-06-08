@@ -68,6 +68,40 @@ func bootstrapDialogs(ctx context.Context, api *tg.Client, cache *dialogCache) e
 	return nil
 }
 
+// refreshChannel refetches a single channel's dialog and replaces its cached
+// entry. It is called when the updates manager reports a channel difference too
+// long to recover incrementally (OnChannelTooLong): the manager advances pts
+// but the intermediate updates are lost, so the unread count must be resynced.
+func refreshChannel(ctx context.Context, api *tg.Client, cache *dialogCache, channelID int64) error {
+	ch, ok := cache.get(channelID)
+	if !ok {
+		// Unknown channel: nothing cached to refresh.
+		return nil
+	}
+	ipc, ok := ch.peer.(*tg.InputPeerChannel)
+	if !ok {
+		return errors.Errorf("channel %d has no input peer", channelID)
+	}
+
+	res, err := api.MessagesGetPeerDialogs(ctx, []tg.InputDialogPeerClass{
+		&tg.InputDialogPeer{Peer: ipc},
+	})
+	if err != nil {
+		return errors.Wrap(err, "get peer dialogs")
+	}
+
+	ent := peer.EntitiesFromResult(res)
+	for _, dlg := range res.Dialogs {
+		refreshed, ok := channelFromDialog(dialogElem{Dialog: dlg, Peer: ipc, Entities: ent})
+		if ok && refreshed.ID == channelID {
+			cache.set(refreshed)
+			return nil
+		}
+	}
+
+	return nil
+}
+
 // readUnread returns the unread messages of a channel, newest first, capped at
 // limit. A non-positive limit defaults to 50.
 func readUnread(ctx context.Context, api *tg.Client, cache *dialogCache, target string, limit int) (UnreadChannel, []Message, error) {
