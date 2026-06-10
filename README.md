@@ -1,5 +1,7 @@
 # tgmcp
 
+<p align="center"><img src="logo.svg" alt="tgmcp logo" width="200"/></p>
+
 A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for
 Telegram, built on the [gotd](https://github.com/gotd/td) client. It lets an MCP
 client (Claude Desktop, Claude Code, etc.) discover which channels have unread

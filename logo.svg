@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Brand-free MCP Telegram Go project logo</title>
+  <desc id="desc">An original abstract logo combining a chat bubble, protocol nodes, and subtle Go-inspired motion arcs without using any third-party brand marks.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="160" y1="120" x2="880" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0EA5A8"/>
+      <stop offset="0.52" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+
+    <linearGradient id="core" x1="280" y1="250" x2="760" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DFFBFF"/>
+    </linearGradient>
+
+    <linearGradient id="node" x1="330" y1="340" x2="700" y2="690" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#A7F3D0"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="22" stdDeviation="28" flood-color="#020617" flood-opacity="0.28"/>
+    </filter>
+
+    <filter id="innerGlow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="
+        0 0 0 0 0.69
+        0 0 0 0 0.96
+        0 0 0 0 1
+        0 0 0 0.55 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background app tile -->
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#bg)"/>
+
+  <!-- Subtle protocol orbit arcs -->
+  <g opacity="0.24" fill="none" stroke="#E0F7FF" stroke-width="28" stroke-linecap="round">
+    <path d="M236 347C331 198 559 170 712 292"/>
+    <path d="M782 664C687 824 442 854 289 717"/>
+  </g>
+
+  <!-- Main chat bubble / protocol container -->
+  <path filter="url(#softShadow)"
+        d="M282 302C282 252.294 322.294 212 372 212H652C701.706 212 742 252.294 742 302V560C742 609.706 701.706 650 652 650H489L360 772C342.988 788.074 315 776.013 315 752.601V639.24C294.96 623.174 282 598.48 282 570V302Z"
+        fill="url(#core)"/>
+
+  <!-- Inner negative-space connector shape -->
+  <g filter="url(#innerGlow)">
+    <path d="M406 404H522C554.033 404 580 429.967 580 462V503"
+          fill="none" stroke="#0F766E" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M522 520H425"
+          fill="none" stroke="#0F766E" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M616 404H641"
+          fill="none" stroke="#0F766E" stroke-width="38" stroke-linecap="round"/>
+  </g>
+
+  <!-- Protocol nodes -->
+  <circle cx="395" cy="404" r="48" fill="url(#node)" stroke="#FFFFFF" stroke-width="16"/>
+  <circle cx="628" cy="404" r="48" fill="url(#node)" stroke="#FFFFFF" stroke-width="16"/>
+  <circle cx="580" cy="520" r="48" fill="url(#node)" stroke="#FFFFFF" stroke-width="16"/>
+  <circle cx="410" cy="520" r="34" fill="#0F766E" opacity="0.92"/>
+
+  <!-- Go-inspired speed marks, abstract and brand-free -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round" opacity="0.82">
+    <path d="M202 446H132"/>
+    <path d="M224 514H168"/>
+    <path d="M831 446H888"/>
+    <path d="M805 514H872"/>
+  </g>
+
+  <!-- Small monogram dots suggesting context packets -->
+  <g fill="#BFFBFF" opacity="0.86">
+    <circle cx="705" cy="300" r="12"/>
+    <circle cx="750" cy="347" r="8"/>
+    <circle cx="273" cy="681" r="10"/>
+    <circle cx="322" cy="729" r="7"/>
+  </g>
+</svg>
