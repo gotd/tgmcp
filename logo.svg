@@ -1,85 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
-  <title id="title">Brand-free MCP Telegram Go project logo</title>
-  <desc id="desc">An original abstract logo combining a chat bubble, protocol nodes, and subtle Go-inspired motion arcs without using any third-party brand marks.</desc>
-
-  <defs>
-    <linearGradient id="bg" x1="160" y1="120" x2="880" y2="900" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0EA5A8"/>
-      <stop offset="0.52" stop-color="#2563EB"/>
-      <stop offset="1" stop-color="#111827"/>
-    </linearGradient>
-
-    <linearGradient id="core" x1="280" y1="250" x2="760" y2="760" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#DFFBFF"/>
-    </linearGradient>
-
-    <linearGradient id="node" x1="330" y1="340" x2="700" y2="690" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#22D3EE"/>
-      <stop offset="1" stop-color="#A7F3D0"/>
-    </linearGradient>
-
-    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="22" stdDeviation="28" flood-color="#020617" flood-opacity="0.28"/>
-    </filter>
-
-    <filter id="innerGlow" x="-25%" y="-25%" width="150%" height="150%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur"/>
-      <feColorMatrix in="blur" type="matrix" values="
-        0 0 0 0 0.69
-        0 0 0 0 0.96
-        0 0 0 0 1
-        0 0 0 0.55 0" result="glow"/>
-      <feMerge>
-        <feMergeNode in="glow"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
-
-  <!-- Background app tile -->
-  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#bg)"/>
-
-  <!-- Subtle protocol orbit arcs -->
-  <g opacity="0.24" fill="none" stroke="#E0F7FF" stroke-width="28" stroke-linecap="round">
-    <path d="M236 347C331 198 559 170 712 292"/>
-    <path d="M782 664C687 824 442 854 289 717"/>
-  </g>
-
-  <!-- Main chat bubble / protocol container -->
-  <path filter="url(#softShadow)"
-        d="M282 302C282 252.294 322.294 212 372 212H652C701.706 212 742 252.294 742 302V560C742 609.706 701.706 650 652 650H489L360 772C342.988 788.074 315 776.013 315 752.601V639.24C294.96 623.174 282 598.48 282 570V302Z"
-        fill="url(#core)"/>
-
-  <!-- Inner negative-space connector shape -->
-  <g filter="url(#innerGlow)">
-    <path d="M406 404H522C554.033 404 580 429.967 580 462V503"
-          fill="none" stroke="#0F766E" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M522 520H425"
-          fill="none" stroke="#0F766E" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M616 404H641"
-          fill="none" stroke="#0F766E" stroke-width="38" stroke-linecap="round"/>
-  </g>
-
-  <!-- Protocol nodes -->
-  <circle cx="395" cy="404" r="48" fill="url(#node)" stroke="#FFFFFF" stroke-width="16"/>
-  <circle cx="628" cy="404" r="48" fill="url(#node)" stroke="#FFFFFF" stroke-width="16"/>
-  <circle cx="580" cy="520" r="48" fill="url(#node)" stroke="#FFFFFF" stroke-width="16"/>
-  <circle cx="410" cy="520" r="34" fill="#0F766E" opacity="0.92"/>
-
-  <!-- Go-inspired speed marks, abstract and brand-free -->
-  <g fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round" opacity="0.82">
-    <path d="M202 446H132"/>
-    <path d="M224 514H168"/>
-    <path d="M831 446H888"/>
-    <path d="M805 514H872"/>
-  </g>
-
-  <!-- Small monogram dots suggesting context packets -->
-  <g fill="#BFFBFF" opacity="0.86">
-    <circle cx="705" cy="300" r="12"/>
-    <circle cx="750" cy="347" r="8"/>
-    <circle cx="273" cy="681" r="10"/>
-    <circle cx="322" cy="729" r="7"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" height="476" preserveAspectRatio="none" style="display: block;" version="1.1" viewBox="0 0 1896 1904" width="474">
+<path d="M 1261.07 539.282 C 1275.88 537.971 1291.34 544.16 1303.16 552.774 C 1331.75 573.623 1342.03 613.161 1330.06 646.035 C 1315.92 684.872 1300.27 723.069 1284.64 761.343 L 1219.76 922.486 C 1165.64 1060.33 1110.6 1197.82 1054.63 1334.93 L 1027.2 1402.39 C 1019.12 1422.69 1006.43 1459.27 994.578 1476.34 C 982.182 1490.82 959.681 1501.85 941.249 1502.75 C 888.405 1505.34 873.532 1457.04 856.449 1417.71 L 821.97 1338.33 C 806.635 1302.69 789.471 1268.07 775.202 1231.95 C 759.112 1191.21 779.49 1172.72 804.696 1144.37 C 818.572 1128.66 832.536 1113.03 846.586 1097.48 L 954.871 974.893 C 969.98 958.643 984.797 942.123 999.312 925.341 C 974.091 941.357 952.793 952.84 927.211 967.307 C 892.683 987.133 858.031 1006.74 823.259 1026.14 L 713.491 1089.06 C 686.992 1104.06 654.019 1127.74 623.187 1126.7 C 597.887 1125.85 575.949 1111.01 554.654 1098.69 L 493.191 1063.03 C 478.56 1054.61 444.319 1036.64 432.297 1028.06 C 418.894 1018.62 409.907 1004.13 407.401 987.926 C 402.629 957.45 415.922 923.099 444.244 909.298 C 466.249 898.576 487.933 888.524 510.094 878.231 L 626.417 824.758 L 947.822 679.141 C 1020.52 645.123 1093.56 611.819 1166.92 579.234 C 1190.29 568.68 1239.31 542.507 1261.07 539.282 z" fill="rgb(29,107,176)" transform="translate(0,0)"></path>
+<path d="M 1318.63 1233.51 C 1367.38 1233.07 1416.12 1233.23 1464.86 1234 C 1453.06 1252.34 1440.9 1277.4 1436.68 1298.66 C 1428.77 1338.44 1441.14 1387.16 1463.38 1420.53 C 1484.6 1452.37 1531.4 1481.88 1568.72 1489.23 C 1551.33 1518.96 1501.36 1571 1475.72 1595.41 C 1320.49 1742.23 1113.79 1822.19 900.163 1818.06 C 688.062 1811.72 486.946 1722.29 340.164 1569.05 C 322.417 1550.17 301.338 1527.14 286.103 1506.29 C 288.443 1505.73 290.761 1505.08 293.053 1504.34 C 333.365 1491.15 361.542 1463.46 380.774 1426.38 C 384.415 1431.99 389.298 1437.48 393.692 1442.56 C 475.458 1537.01 570.297 1597.64 685.917 1643.45 C 917.611 1735.25 1193.33 1679.35 1370.57 1504.14 C 1389.07 1483.96 1399.58 1452.83 1397.71 1425.79 C 1394 1372.28 1369.96 1364.95 1324.42 1364.36 C 1306.4 1364.09 1288.38 1364.21 1270.37 1364.72 C 1245.37 1365.25 1225.11 1366.91 1204.8 1348.83 C 1175.85 1323.06 1177.36 1278.67 1202.37 1250.78 C 1220.92 1230.1 1249.18 1233.43 1274.65 1233.7 C 1289.31 1233.87 1303.97 1233.8 1318.63 1233.51 z" fill="rgb(29,107,176)" transform="translate(0,0)"></path>
+<path d="M 1060.4 146.733 C 1137.14 158.148 1211.77 180.861 1281.85 214.134 C 1475.55 307.223 1624.76 472.888 1697.15 675.229 C 1749.83 822.697 1760.28 994.237 1721.09 1146.21 C 1718.53 1156.15 1705.9 1204.55 1702.75 1211.22 C 1700.81 1210.8 1700.51 1209.66 1698.88 1207.72 C 1664.9 1177.14 1632.52 1166.93 1586.18 1166.85 C 1653.55 937.065 1613.96 696.74 1459.14 510.914 C 1374.1 408.842 1266.23 333.954 1139.28 293.758 C 1111.13 284.845 1073.33 273.021 1044.01 270.612 C 1069.59 231.943 1072.74 190.799 1060.4 146.733 z" fill="rgb(29,107,176)" transform="translate(0,0)"></path>
+<path d="M 771.413 147.378 L 772.229 147.319 L 772.931 148.42 C 760.764 191.968 764.982 231.075 791.127 268.982 C 762.898 276.079 736.463 282.236 708.493 291.016 C 531.251 346.608 383.557 470.694 298.236 635.696 C 230.39 768.752 206.341 919.85 229.526 1067.4 C 236.234 1110.48 246.83 1150.22 259.822 1191.61 C 219.326 1192.02 189.242 1197.91 155.695 1221.39 L 142.532 1231.6 C 142.097 1224.93 130.17 1189.15 127.54 1179.55 C 119.82 1151.56 113.824 1123.12 109.585 1094.4 C 74.7561 867.904 119.117 656.434 254.538 470.059 C 376.945 301.594 564.38 178.918 771.413 147.378 z" fill="rgb(29,107,176)" transform="translate(0,0)"></path>
+<path d="M 236.578 1242.82 C 298.03 1239.65 350.439 1286.85 353.703 1348.29 C 356.967 1409.74 309.854 1462.22 248.412 1465.59 C 186.832 1468.96 134.204 1421.71 130.933 1360.13 C 127.661 1298.54 174.987 1245.99 236.578 1242.82 z" fill="rgb(29,107,176)" transform="translate(0,0)"></path>
+<path d="M 1587.07 1218.82 C 1648.58 1216.25 1700.53 1264.01 1703.13 1325.52 C 1705.73 1387.02 1657.99 1438.99 1596.48 1441.62 C 1534.95 1444.24 1482.94 1396.46 1480.34 1334.93 C 1477.74 1273.39 1525.53 1221.4 1587.07 1218.82 z" fill="rgb(29,107,176)" transform="translate(0,0)"></path>
+<path d="M 905.687 87.5908 C 961.885 81.473 1012.38 122.127 1018.4 178.336 C 1024.42 234.544 983.673 284.967 927.454 290.886 C 871.375 296.79 821.106 256.171 815.102 200.103 C 809.099 144.034 849.629 93.6932 905.687 87.5908 z" fill="rgb(29,107,176)" transform="translate(0,0)"></path>
+<metadata><recraft-signature>{"signed_by": "recraft", "signature_b64": "+eZARjsXfA6oQqYVrHucaUDraUJkAnAmO5rnMVWLc+kmLVzgSoErIwqVkQ8lhSLFs3KpH+RY3SkXtcfBNsi+Dw==", "signing_algo": "Ed25519", "generation_timestamp": 1781084064, "identifier": "5a17ad9b-fb78-4f19-bfc1-054f63d2cd95"}</recraft-signature></metadata></svg>
