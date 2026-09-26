@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"time"
 
@@ -93,53 +94,117 @@ type dialogStore struct {
 	db *bolt.DB
 }
 
+func dialogKeyParts(kind string, id int64) string {
+	return fmt.Sprintf("%s:%d", kind, id)
+}
+
+func dialogKey(ch UnreadChannel) string {
+	switch ch.peer.(type) {
+	case *tg.InputPeerUser:
+		return dialogKeyParts("user", ch.ID)
+	case *tg.InputPeerChat:
+		return dialogKeyParts("chat", ch.ID)
+	default:
+		return dialogKeyParts("channel", ch.ID)
+	}
+}
+
+func dialogStoreKey(ch UnreadChannel) []byte {
+	return []byte(dialogKey(ch))
+}
+
 // storedDialog is the on-disk representation of an UnreadChannel. The access
 // hash is stored explicitly so the input peer can be rebuilt on load.
 type storedDialog struct {
 	ID             int64  `json:"id"`
 	Title          string `json:"title"`
 	Username       string `json:"username,omitempty"`
+	Type           string `json:"type,omitempty"`
 	UnreadCount    int    `json:"unread_count"`
 	UnreadMark     bool   `json:"unread_mark,omitempty"`
 	Broadcast      bool   `json:"broadcast,omitempty"`
 	Megagroup      bool   `json:"megagroup,omitempty"`
 	ReadInboxMaxID int    `json:"read_inbox_max_id"`
 	AccessHash     int64  `json:"access_hash"`
+	// IsUser and IsChat distinguish peer kinds for non-channel dialogs.
+	// Channels use Broadcast/Megagroup.
+	IsUser bool `json:"is_user,omitempty"`
+	IsChat bool `json:"is_chat,omitempty"`
 }
 
 func toStored(ch UnreadChannel) storedDialog {
 	var accessHash int64
-	if ipc, ok := ch.peer.(*tg.InputPeerChannel); ok {
-		accessHash = ipc.AccessHash
+	isUser, isChat := false, false
+	typ := ch.Type
+	switch p := ch.peer.(type) {
+	case *tg.InputPeerChannel:
+		accessHash = p.AccessHash
+		if typ == "" {
+			typ = typeChannel
+		}
+	case *tg.InputPeerUser:
+		accessHash = p.AccessHash
+		isUser = true
+		if typ == "" {
+			typ = typePrivate
+		}
+	case *tg.InputPeerChat:
+		isChat = true
+		if typ == "" {
+			typ = typeGroup
+		}
 	}
 
 	return storedDialog{
 		ID:             ch.ID,
 		Title:          ch.Title,
 		Username:       ch.Username,
+		Type:           typ,
 		UnreadCount:    ch.UnreadCount,
 		UnreadMark:     ch.UnreadMark,
-		Broadcast:      ch.Broadcast,
-		Megagroup:      ch.Megagroup,
+		Broadcast:      typ == typeChannel,
+		Megagroup:      typ == typeSupergroup,
 		ReadInboxMaxID: ch.readInboxMaxID,
 		AccessHash:     accessHash,
+		IsUser:         isUser,
+		IsChat:         isChat,
 	}
 }
 
 func (s storedDialog) toChannel() UnreadChannel {
+	var peer tg.InputPeerClass
+	typ := s.Type
+	switch {
+	case s.IsUser:
+		peer = &tg.InputPeerUser{UserID: s.ID, AccessHash: s.AccessHash}
+		if typ == "" {
+			typ = typePrivate
+		}
+	case s.IsChat:
+		peer = &tg.InputPeerChat{ChatID: s.ID}
+		if typ == "" {
+			typ = typeGroup
+		}
+	default:
+		peer = &tg.InputPeerChannel{ChannelID: s.ID, AccessHash: s.AccessHash}
+		if typ == "" {
+			// Written before Type existed: the bools are all there is.
+			typ = typeChannel
+			if s.Megagroup {
+				typ = typeSupergroup
+			}
+		}
+	}
+
 	return UnreadChannel{
 		ID:             s.ID,
 		Title:          s.Title,
 		Username:       s.Username,
 		UnreadCount:    s.UnreadCount,
 		UnreadMark:     s.UnreadMark,
-		Broadcast:      s.Broadcast,
-		Megagroup:      s.Megagroup,
+		Type:           typ,
 		readInboxMaxID: s.ReadInboxMaxID,
-		peer: &tg.InputPeerChannel{
-			ChannelID:  s.ID,
-			AccessHash: s.AccessHash,
-		},
+		peer:           peer,
 	}
 }
 
@@ -156,7 +221,7 @@ func (d *dialogStore) put(ch UnreadChannel) error {
 			return errors.Wrap(err, "create bucket")
 		}
 
-		return b.Put(i64b(ch.ID), data)
+		return b.Put(dialogStoreKey(ch), data)
 	})
 }
 
@@ -177,7 +242,7 @@ func (d *dialogStore) putAll(chs []UnreadChannel) error {
 			if err != nil {
 				return errors.Wrap(err, "marshal dialog")
 			}
-			if err := b.Put(i64b(ch.ID), data); err != nil {
+			if err := b.Put(dialogStoreKey(ch), data); err != nil {
 				return errors.Wrap(err, "put dialog")
 			}
 		}
@@ -192,6 +257,12 @@ func (d *dialogStore) delete(channelID int64) error {
 		b := tx.Bucket(dialogsBucket)
 		if b == nil {
 			return nil
+		}
+
+		for _, kind := range []string{"channel", "chat", "user"} {
+			if err := b.Delete([]byte(dialogKeyParts(kind, channelID))); err != nil {
+				return err
+			}
 		}
 
 		return b.Delete(i64b(channelID))

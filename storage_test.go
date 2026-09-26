@@ -28,7 +28,7 @@ func channel(id int64, accessHash int64, unread int) UnreadChannel {
 		Title:          "Channel",
 		Username:       "chan",
 		UnreadCount:    unread,
-		Broadcast:      true,
+		Type:           typeChannel,
 		readInboxMaxID: 1000 + int(id),
 		peer:           &tg.InputPeerChannel{ChannelID: id, AccessHash: accessHash},
 	}
@@ -71,7 +71,7 @@ func TestDialogStore(t *testing.T) {
 
 	roundTrip := got[0]
 	if roundTrip.ID != want.ID || roundTrip.Title != want.Title || roundTrip.Username != want.Username ||
-		roundTrip.UnreadCount != want.UnreadCount || roundTrip.Broadcast != want.Broadcast ||
+		roundTrip.UnreadCount != want.UnreadCount || roundTrip.Type != want.Type ||
 		roundTrip.readInboxMaxID != want.readInboxMaxID {
 		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", roundTrip, want)
 	}
@@ -273,4 +273,39 @@ func equalInts(a, b []int) bool {
 	}
 
 	return true
+}
+
+// Dialogs written before Type existed carry only the broadcast/megagroup
+// bools. Dropping the fields from UnreadChannel must not silently retype every
+// channel in an existing session file.
+func TestStoredDialogLegacyType(t *testing.T) {
+	tests := []struct {
+		name string
+		in   storedDialog
+		want string
+	}{
+		{name: "broadcast", in: storedDialog{ID: 1, Broadcast: true}, want: typeChannel},
+		{name: "megagroup", in: storedDialog{ID: 2, Megagroup: true}, want: typeSupergroup},
+		{name: "user", in: storedDialog{ID: 3, IsUser: true}, want: typePrivate},
+		{name: "chat", in: storedDialog{ID: 4, IsChat: true}, want: typeGroup},
+		// A newer file states the type outright, and it wins.
+		{name: "explicit", in: storedDialog{ID: 5, Type: typeSupergroup}, want: typeSupergroup},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.in.toChannel().Type; got != tt.want {
+				t.Errorf("type %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// And the bools must keep being written, so that rolling back to a build that
+// reads them does not find every channel untyped.
+func TestToStoredKeepsLegacyFlags(t *testing.T) {
+	ch := UnreadChannel{ID: 1, Type: typeSupergroup, peer: &tg.InputPeerChannel{ChannelID: 1}}
+	got := toStored(ch)
+	if !got.Megagroup || got.Broadcast {
+		t.Errorf("got broadcast=%v megagroup=%v, want megagroup only", got.Broadcast, got.Megagroup)
+	}
 }

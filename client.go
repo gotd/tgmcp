@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/go-faster/errors"
-	"github.com/gotd/contrib/middleware/floodwait"
+	"github.com/go-faster/sdk/app"
 	"github.com/gotd/contrib/middleware/ratelimit"
+	"github.com/gotd/contrib/oteltg"
+	"github.com/gotd/log/logzap"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/time/rate"
@@ -19,17 +21,31 @@ import (
 	"github.com/gotd/td/tg"
 )
 
-// newLogger builds the JSON logger written to stderr so that journald (or any
-// supervisor) captures it.
-func newLogger(cfg Config) (*zap.Logger, error) {
+// zapConfig builds the JSON logger configuration written to stderr so that
+// journald (or any supervisor) captures it.
+//
+// [app.Run] builds the logger from it and additionally honors OTEL_LOG_LEVEL.
+func zapConfig(cfg Config) (zap.Config, error) {
 	level, err := zapcore.ParseLevel(cfg.LogLevel)
 	if err != nil {
-		return nil, errors.Wrapf(err, "parse log level %q", cfg.LogLevel)
+		return zap.Config{}, errors.Wrapf(err, "parse log level %q", cfg.LogLevel)
 	}
 
 	logCfg := zap.NewProductionConfig()
 	logCfg.Level = zap.NewAtomicLevelAt(level)
 	logCfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	return logCfg, nil
+}
+
+// newLogger builds a standalone logger for commands that do not run under
+// [app.Run], such as "tgmcp auth".
+func newLogger(cfg Config) (*zap.Logger, error) {
+	logCfg, err := zapConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	lg, err := logCfg.Build()
 	if err != nil {
 		return nil, errors.Wrap(err, "build logger")
@@ -45,34 +61,51 @@ func newLogger(cfg Config) (*zap.Logger, error) {
 // callers can wire in a dispatcher or the updates manager. Pass nil for the
 // default no-op handler.
 //
-// The returned waiter must wrap client.Run:
-//
-//	return waiter.Run(ctx, func(ctx context.Context) error {
-//	    return client.Run(ctx, handler)
-//	})
-func newClient(cfg Config, handler telegram.UpdateHandler, lg *zap.Logger) (*telegram.Client, *floodwait.Waiter, error) {
+// t is optional: when non-nil, every MTProto call is traced and measured. Pass
+// nil for commands that run outside [app.Run], such as "tgmcp auth".
+func newClient(cfg Config, handler telegram.UpdateHandler, lg *zap.Logger, t *app.Telemetry) (*telegram.Client, error) {
 	if err := os.MkdirAll(cfg.SessionDir, 0o700); err != nil {
-		return nil, nil, errors.Wrap(err, "create session dir")
+		return nil, errors.Wrap(err, "create session dir")
 	}
 
-	waiter := floodwait.NewWaiter().WithCallback(func(ctx context.Context, wait floodwait.FloodWait) {
-		lg.Warn("Flood wait", zap.Duration("wait", wait.Duration))
+	middlewares := []telegram.Middleware{invokeLogger(lg)}
+
+	var metrics *tgMetrics
+	if t != nil {
+		otelMW, err := oteltg.New(t.MeterProvider(), t.TracerProvider())
+		if err != nil {
+			return nil, errors.Wrap(err, "otel middleware")
+		}
+		middlewares = append(middlewares, otelMW)
+
+		m, err := newTGMetrics(t.MeterProvider().Meter(instrumentName))
+		if err != nil {
+			return nil, errors.Wrap(err, "init Telegram metrics")
+		}
+		metrics = &m
+	}
+
+	waiter := newFloodWaiter().withCallback(func(ctx context.Context, wait time.Duration) {
+		if metrics != nil {
+			metrics.FloodWaits.Add(ctx, 1)
+		}
+		lg.Warn("Flood wait", zap.Duration("wait", wait))
 	})
+	middlewares = append(middlewares,
+		waiter,
+		ratelimit.New(rate.Every(time.Millisecond*100), 5),
+	)
 
 	client := telegram.NewClient(cfg.AppID, cfg.AppHash, telegram.Options{
-		Logger: lg,
+		Logger: logzap.New(lg),
 		SessionStorage: &telegram.FileSessionStorage{
 			Path: filepath.Join(cfg.SessionDir, "session.json"),
 		},
 		UpdateHandler: handler,
-		Middlewares: []telegram.Middleware{
-			invokeLogger(lg),
-			waiter,
-			ratelimit.New(rate.Every(time.Millisecond*100), 5),
-		},
+		Middlewares:   middlewares,
 	})
 
-	return client, waiter, nil
+	return client, nil
 }
 
 // invokeLogger is a Telegram middleware that logs every MTProto RPC call at

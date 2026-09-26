@@ -16,6 +16,10 @@
 
 /tgmcp
 
+# Credentials and session state.
+.env
+/session
+
 # goreleaser
 dist
 coverage.txt
